@@ -9,24 +9,39 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix=CONFIG["prefix"], intents=intents, help_command=None)
 
+class BoutonSupprimerTicket(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="🗑️ Supprimer le ticket", style=discord.ButtonStyle.red, custom_id="supprimer_ticket")
+    async def supprimer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("Suppression dans 3 secondes...")
+        import asyncio
+        await asyncio.sleep(3)
+        await interaction.channel.delete()
+
 class BoutonFermerTicket(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(label="🔒 Fermer le ticket", style=discord.ButtonStyle.red, custom_id="fermer_ticket")
     async def fermer(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(description=f"Ticket fermé par {interaction.user.mention}. Suppression dans **5 secondes**.", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed)
-        import asyncio
-        await asyncio.sleep(5)
-        await interaction.channel.delete()
+        channel = interaction.channel
+        guild = interaction.guild
+        for target, overwrite in channel.overwrites.items():
+            if target != guild.me:
+                overwrite.send_messages = False
+                await channel.set_permissions(target, overwrite=overwrite)
+        embed = discord.Embed(title="🔒 Ticket fermé", description=f"Ce ticket a été fermé par {interaction.user.mention}.\nPlus personne ne peut écrire.", color=discord.Color.red())
+        embed.set_footer(text=CONFIG.get("owner_name", "Support"))
+        await interaction.response.send_message(embed=embed, view=BoutonSupprimerTicket())
 
 class BoutonTicket(discord.ui.View):
     def __init__(self, type_ticket: str, label_btn: str, resume: str):
         super().__init__(timeout=None)
         self.type_ticket = type_ticket
         self.resume = resume
-        btn = discord.ui.Button(label=label_btn, style=discord.ButtonStyle.green, custom_id=f"open_{type_ticket}", emoji="🎫")
+        btn = discord.ui.Button(label=label_btn, style=discord.ButtonStyle.blurple, custom_id=f"open_{type_ticket}")
         btn.callback = self.ouvrir
         self.add_item(btn)
 
@@ -43,16 +58,12 @@ class BoutonTicket(discord.ui.View):
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(view_channel=False),
             member: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_channels=True, manage_permissions=True),
         }
         if staff_role:
             overwrites[staff_role] = discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         salon = await guild.create_text_channel(name=nom_salon, category=categorie, overwrites=overwrites)
-        embed = discord.Embed(color=discord.Color.from_str(CONFIG["embed_color"]))
-        embed.add_field(name=f"👋 Bienvenue {member.display_name} !", value="\u200b", inline=False)
-        embed.add_field(name="\u200b", value="Merci d'avoir ouvert un ticket.\nUn membre du staff va te répondre rapidement.", inline=False)
-        embed.add_field(name="\u200b", value=f"**Commande :** {self.resume}", inline=False)
-        embed.add_field(name="\u200b", value=f"⏰ Temps de réponse : {CONFIG.get('response_time', '< 24h')}", inline=False)
+        embed = discord.Embed(title=f"👋 Bienvenue {member.display_name} !", description=f"Merci d'avoir ouvert un ticket.\nUn membre du staff va te répondre rapidement.\n\n**Commande :** {self.resume}\n\n⏰ Temps de réponse : {CONFIG.get('response_time', '< 24h')}", color=discord.Color.from_str(CONFIG["embed_color"]))
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_footer(text=CONFIG.get("owner_name", "Support"), icon_url=bot.user.display_avatar.url)
         embed.timestamp = discord.utils.utcnow()
@@ -62,10 +73,10 @@ class BoutonTicket(discord.ui.View):
 
 class CompteModal(discord.ui.Modal, title="🧾 Nouvelle fiche compte"):
     champ_titre = discord.ui.TextInput(label="Titre", placeholder="Ex: New Account | 1775243294683", required=True, max_length=256)
-    champ_description = discord.ui.TextInput(label="Description", placeholder="Écris librement...", style=discord.TextStyle.paragraph, required=False, max_length=1024)
+    champ_description = discord.ui.TextInput(label="Description", placeholder="Écris librement, retours à la ligne, emojis...", style=discord.TextStyle.paragraph, required=False, max_length=1024)
     champ_stats = discord.ui.TextInput(label="Stats / Infos", placeholder="💰 Price — 550€\n🏆 Trophies — 95000", style=discord.TextStyle.paragraph, required=False, max_length=1024)
     champ_image = discord.ui.TextInput(label="URL de l'image (optionnel)", placeholder="https://...", required=False)
-    champ_btn = discord.ui.TextInput(label="Texte du bouton de commande", placeholder="Ex: 🧾 Commander", required=True, max_length=80, default="🧾 Commander")
+    champ_btn = discord.ui.TextInput(label="Texte du bouton (laisser vide = Commander)", placeholder="Ex: Commander  /  Acheter  /  Contact", required=False, max_length=80)
 
     def __init__(self, salon, couleur):
         super().__init__()
@@ -84,8 +95,9 @@ class CompteModal(discord.ui.Modal, title="🧾 Nouvelle fiche compte"):
             embed.set_image(url=self.champ_image.value.strip())
         embed.set_footer(text=CONFIG.get("owner_name", "Boutique"), icon_url=bot.user.display_avatar.url)
         embed.timestamp = discord.utils.utcnow()
+        label = self.champ_btn.value.strip() or "Commander"
         target = self.salon or interaction.channel
-        await target.send(embed=embed, view=BoutonTicket(type_ticket="compte", label_btn=self.champ_btn.value, resume=self.champ_titre.value))
+        await target.send(embed=embed, view=BoutonTicket(type_ticket="compte", label_btn=label, resume=self.champ_titre.value))
         await interaction.response.send_message("✅ Fiche envoyée !", ephemeral=True)
 
 class BoostModal(discord.ui.Modal, title="⚡ Nouvelle fiche boost"):
@@ -93,7 +105,7 @@ class BoostModal(discord.ui.Modal, title="⚡ Nouvelle fiche boost"):
     champ_description = discord.ui.TextInput(label="Description", placeholder="Décris le boost librement...", style=discord.TextStyle.paragraph, required=False, max_length=1024)
     champ_infos = discord.ui.TextInput(label="Infos / Prix", placeholder="💰 Prix — 2.99€\n⏳ Durée — 30 jours", style=discord.TextStyle.paragraph, required=False, max_length=1024)
     champ_image = discord.ui.TextInput(label="URL de l'image (optionnel)", placeholder="https://...", required=False)
-    champ_btn = discord.ui.TextInput(label="Texte du bouton de commande", placeholder="Ex: ⚡ Commander", required=True, max_length=80, default="⚡ Commander")
+    champ_btn = discord.ui.TextInput(label="Texte du bouton (laisser vide = Commander)", placeholder="Ex: Commander  /  Acheter  /  Contact", required=False, max_length=80)
 
     def __init__(self, salon, couleur):
         super().__init__()
@@ -112,8 +124,9 @@ class BoostModal(discord.ui.Modal, title="⚡ Nouvelle fiche boost"):
             embed.set_image(url=self.champ_image.value.strip())
         embed.set_footer(text=CONFIG.get("owner_name", "Boutique"), icon_url=bot.user.display_avatar.url)
         embed.timestamp = discord.utils.utcnow()
+        label = self.champ_btn.value.strip() or "Commander"
         target = self.salon or interaction.channel
-        await target.send(embed=embed, view=BoutonTicket(type_ticket="boost", label_btn=self.champ_btn.value, resume=self.champ_titre.value))
+        await target.send(embed=embed, view=BoutonTicket(type_ticket="boost", label_btn=label, resume=self.champ_titre.value))
         await interaction.response.send_message("✅ Fiche boost envoyée !", ephemeral=True)
 
 class AnnonceModal(discord.ui.Modal, title="📢 Nouvelle annonce"):
@@ -127,9 +140,7 @@ class AnnonceModal(discord.ui.Modal, title="📢 Nouvelle annonce"):
         self.mention = mention
 
     async def on_submit(self, interaction: discord.Interaction):
-        embed = discord.Embed(color=discord.Color.from_str(CONFIG["embed_color"]))
-        embed.add_field(name=self.champ_titre.value, value="\u200b", inline=False)
-        embed.add_field(name="\u200b", value=self.champ_contenu.value, inline=False)
+        embed = discord.Embed(title=self.champ_titre.value, description=self.champ_contenu.value, color=discord.Color.from_str(CONFIG["embed_color"]))
         if self.champ_image.value.strip():
             embed.set_image(url=self.champ_image.value.strip())
         embed.set_footer(text=f"Annonce de {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
@@ -146,12 +157,14 @@ async def on_ready():
         "playing": discord.Game(name=CONFIG["status_text"]),
         "watching": discord.Activity(type=discord.ActivityType.watching, name=CONFIG["status_text"]),
         "listening": discord.Activity(type=discord.ActivityType.listening, name=CONFIG["status_text"]),
+        "streaming": discord.Streaming(name=CONFIG["status_text"], url=CONFIG.get("stream_url", "")),
         "competing": discord.Activity(type=discord.ActivityType.competing, name=CONFIG["status_text"]),
         "custom": discord.CustomActivity(name=CONFIG["status_text"]),
     }
     sm = {"online": discord.Status.online, "idle": discord.Status.idle, "dnd": discord.Status.dnd, "invisible": discord.Status.invisible}
     await bot.change_presence(activity=acts.get(CONFIG["status_type"]), status=sm.get(CONFIG["presence"], discord.Status.online))
     bot.add_view(BoutonFermerTicket())
+    bot.add_view(BoutonSupprimerTicket())
     try:
         synced = await bot.tree.sync()
         print(f"🔄  {len(synced)} commande(s) sync")
@@ -163,8 +176,7 @@ async def on_member_join(member):
     ch = bot.get_channel(CONFIG.get("welcome_channel_id") or 0)
     if not ch:
         return
-    embed = discord.Embed(color=discord.Color.from_str(CONFIG["embed_color"]))
-    embed.add_field(name=f"👋 Bienvenue {member.display_name} !", value=CONFIG.get("welcome_message", ""), inline=False)
+    embed = discord.Embed(title=f"👋 Bienvenue {member.display_name} !", description=CONFIG.get("welcome_message", ""), color=discord.Color.from_str(CONFIG["embed_color"]))
     embed.set_thumbnail(url=member.display_avatar.url)
     embed.set_footer(text=f"{member.guild.name} • {member.guild.member_count} membres")
     await ch.send(embed=embed)
@@ -196,10 +208,7 @@ async def annonce_command(interaction: discord.Interaction, mention: str = "none
 @app_commands.describe(question="La question", salon="Salon cible")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def sondage_command(interaction: discord.Interaction, question: str, salon: discord.TextChannel | None = None):
-    embed = discord.Embed(color=discord.Color.from_str(CONFIG["embed_color"]))
-    embed.add_field(name="📊 Sondage", value="\u200b", inline=False)
-    embed.add_field(name="\u200b", value=f"**{question}**", inline=False)
-    embed.add_field(name="\u200b", value="👍 Oui  ·  👎 Non", inline=False)
+    embed = discord.Embed(title="📊 Sondage", description=f"**{question}**\n\n👍 Oui  ·  👎 Non", color=discord.Color.from_str(CONFIG["embed_color"]))
     embed.set_footer(text=f"Sondage de {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
     embed.timestamp = discord.utils.utcnow()
     target = salon or interaction.channel
@@ -243,9 +252,7 @@ async def statut_command(interaction: discord.Interaction, type_activite: str, t
 
 @bot.tree.command(name="aide", description="📖 Liste des commandes")
 async def aide_command(interaction: discord.Interaction):
-    embed = discord.Embed(color=discord.Color.from_str(CONFIG["embed_color"]))
-    embed.add_field(name="📖 Commandes", value="\u200b", inline=False)
-    embed.add_field(name="\u200b", value=("`/compte` — Fiche compte + ticket\n`/boost` — Fiche boost + ticket\n`/annonce` — Annonce\n`/sondage` — Sondage 👍/👎\n`/statut` — Changer le statut *(Admin)*\n`/aide` — Cette page"), inline=False)
+    embed = discord.Embed(title="📖 Commandes", description=("`/compte` — Fiche compte + ticket\n`/boost` — Fiche boost + ticket\n`/annonce` — Annonce\n`/sondage` — Sondage 👍/👎\n`/statut` — Changer le statut *(Admin)*\n`/aide` — Cette page"), color=discord.Color.from_str(CONFIG["embed_color"]))
     embed.set_footer(text=CONFIG.get("owner_name", "Bot"), icon_url=bot.user.display_avatar.url)
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
