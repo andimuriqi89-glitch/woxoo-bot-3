@@ -2,7 +2,7 @@ CONFIG = {
     "token": "",
     "prefix": "!",
     "embed_color": "#5865F2",
-    "status_type": "watching",
+    "status_type": "streaming",
     "status_text": "Woxoo Market 🛒",
     "stream_url": "https://twitch.tv/woxoo",
     "presence": "dnd",
