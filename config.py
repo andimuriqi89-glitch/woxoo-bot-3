@@ -5,7 +5,7 @@ CONFIG = {
     "status_type": "watching",
     "status_text": "Woxoo Market 🛒",
     "stream_url": "https://twitch.tv/woxoo",
-    "presence": "online",
+    "presence": "dnd",
     "owner_name": "Woxoo Bot",
     "staff_role_id": 1490444529164357905,
     "ticket_category": "📩 TICKETS",
